@@ -12,27 +12,34 @@ camera.position.z = 5;
 // 创建渲染器
 const renderer = new THREE.WebGLRenderer({ 
     antialias: true,
-    alpha: true 
+    alpha: true,
+    precision: 'highp'
 });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // 限制最大像素比
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.2;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
 
 // 创建地球
-const earthGeometry = new THREE.SphereGeometry(2, 256, 256);
-const earthTexture = new THREE.TextureLoader().load('/earth-texture.jpg');
+const earthGeometry = new THREE.SphereGeometry(2, 512, 512);
+const earthTexture = new THREE.TextureLoader().load('/earth-texture.jpg', (texture) => {
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+});
 const earthMaterial = new THREE.MeshPhongMaterial({
     map: earthTexture,
     bumpMap: earthTexture,
-    bumpScale: 0.1,
+    bumpScale: 0.15,
     specularMap: earthTexture,
-    specular: new THREE.Color(0x666666),
-    shininess: 15,
-    emissive: new THREE.Color(0x112244),
-    emissiveIntensity: 0.3,
-    normalScale: new THREE.Vector2(0.5, 0.5)
+    specular: new THREE.Color(0x88ff88),
+    shininess: 25,
+    emissive: new THREE.Color(0x112211),
+    emissiveIntensity: 0.4,
+    normalScale: new THREE.Vector2(0.8, 0.8)
 });
 
 // 添加颜色渐变效果
@@ -59,23 +66,69 @@ const fragmentShader = `
     void main() {
         vec4 texColor = texture2D(earthTexture, vUv);
         
-        // 添加颜色增强
-        vec3 enhancedColor = texColor.rgb;
-        enhancedColor.r *= 1.2; // 增强红色
-        enhancedColor.g *= 1.1; // 增强绿色
-        enhancedColor.b *= 1.3; // 增强蓝色
+        // 增强对比度
+        texColor.rgb = pow(texColor.rgb, vec3(0.9));
         
-        // 添加动态光效
-        float light = dot(vNormal, normalize(vec3(1.0, 1.0, 1.0)));
-        light = pow(light, 2.0);
+        // 判断是陆地还是海洋（基于纹理的亮度）
+        float brightness = dot(texColor.rgb, vec3(0.299, 0.587, 0.114));
+        bool isLand = brightness > 0.3;
+        
+        // 分别处理陆地和海洋的颜色
+        vec3 enhancedColor;
+        if (isLand) {
+            // 陆地增强绿色和细节
+            enhancedColor = texColor.rgb;
+            enhancedColor.r *= 0.8;
+            enhancedColor.g *= 1.4;
+            enhancedColor.b *= 0.9;
+            
+            // 增强陆地细节
+            float detail = sin(vUv.x * 100.0) * sin(vUv.y * 100.0) * 0.02;
+            enhancedColor += vec3(detail);
+        } else {
+            // 海洋保持蓝色并增强深度感
+            enhancedColor = texColor.rgb;
+            enhancedColor.r *= 0.7;
+            enhancedColor.g *= 0.8;
+            enhancedColor.b *= 1.2;
+            
+            // 添加海洋波纹效果
+            float wave = sin(vUv.x * 50.0 + time * 2.0) * sin(vUv.y * 50.0 + time * 2.0) * 0.02;
+            enhancedColor += vec3(wave);
+        }
+        
+        // 计算多个方向的光照
+        vec3 lightDir1 = normalize(vec3(1.0, 1.0, 1.0));
+        vec3 lightDir2 = normalize(vec3(-1.0, -1.0, -1.0));
+        vec3 lightDir3 = normalize(vec3(-1.0, -1.0, 0.0));
+        
+        float light1 = max(0.0, dot(vNormal, lightDir1));
+        float light2 = max(0.0, dot(vNormal, lightDir2));
+        float light3 = max(0.0, dot(vNormal, lightDir3));
+        
+        // 合并光照效果
+        float light = light1 + light2 * 0.5 + light3 * 0.7;
+        light = pow(light, 1.1); // 降低光照衰减
+        
+        // 添加边缘光效
+        float rimLight = 1.0 - max(0.0, dot(vNormal, vec3(0.0, 0.0, 1.0)));
+        rimLight = pow(rimLight, 1.5);
         
         // 添加极光效果
         float aurora = sin(vPosition.y * 10.0 + time) * 0.5 + 0.5;
         aurora *= smoothstep(0.8, 1.0, abs(vPosition.y));
-        vec3 auroraColor = vec3(0.0, 0.8, 1.0) * aurora * 0.3;
+        vec3 auroraColor = vec3(0.0, 1.0, 0.5) * aurora * 0.3;
         
         // 合并所有效果
-        vec3 finalColor = enhancedColor * (0.7 + 0.3 * light) + auroraColor;
+        vec3 finalColor = enhancedColor * (0.85 + 0.15 * light) + // 提高基础亮度
+                         rimLight * vec3(0.0, 0.5, 0.3) + 
+                         auroraColor;
+        
+        // 确保没有完全黑暗的区域
+        finalColor = max(finalColor, vec3(0.15));
+        
+        // 最终颜色调整
+        finalColor = pow(finalColor, vec3(0.95)); // 轻微提升对比度
         
         gl_FragColor = vec4(finalColor, 1.0);
     }
@@ -115,7 +168,7 @@ const atmosphereMaterial = new THREE.ShaderMaterial({
         
         void main() {
             float intensity = pow(0.7 - dot(vNormal, vec3(0.0, 0.0, 1.0)), 2.0);
-            vec3 atmosphereColor = vec3(0.3, 0.6, 1.0);
+            vec3 atmosphereColor = vec3(0.2, 0.8, 0.4);
             
             // 添加动态光效
             float light = dot(vNormal, normalize(vec3(1.0, 1.0, 1.0)));
@@ -124,7 +177,7 @@ const atmosphereMaterial = new THREE.ShaderMaterial({
             // 添加极光效果
             float aurora = sin(vPosition.y * 10.0 + time) * 0.5 + 0.5;
             aurora *= smoothstep(0.8, 1.0, abs(vPosition.y));
-            vec3 auroraColor = vec3(0.0, 0.8, 1.0) * aurora * 0.3;
+            vec3 auroraColor = vec3(0.0, 1.0, 0.5) * aurora * 0.3;
             
             vec3 finalColor = atmosphereColor * intensity * (0.7 + 0.3 * light) + auroraColor;
             gl_FragColor = vec4(finalColor, intensity * 0.3);
@@ -138,18 +191,33 @@ const atmosphere = new THREE.Mesh(atmosphereGeometry, atmosphereMaterial);
 scene.add(atmosphere);
 
 // 添加环境光
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
 scene.add(ambientLight);
 
 // 添加定向光（模拟太阳光）
-const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2);
+const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
 directionalLight.position.set(5, 3, 5);
 scene.add(directionalLight);
 
 // 添加点光源
-const pointLight = new THREE.PointLight(0x88ccff, 1.5, 100);
+const pointLight = new THREE.PointLight(0x88ccff, 0.8, 100);
 pointLight.position.set(10, 10, 10);
 scene.add(pointLight);
+
+// 添加补光
+const fillLight = new THREE.DirectionalLight(0x88ff88, 0.7);
+fillLight.position.set(-5, -3, -5);
+scene.add(fillLight);
+
+// 添加额外的环境补光
+const backLight = new THREE.DirectionalLight(0xffffff, 0.5);
+backLight.position.set(-5, -3, -5);
+scene.add(backLight);
+
+// 添加左下角补光
+const bottomLeftLight = new THREE.DirectionalLight(0xffffff, 0.6);
+bottomLeftLight.position.set(-5, -5, -5);
+scene.add(bottomLeftLight);
 
 // 添加轨道控制器
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -158,6 +226,9 @@ controls.dampingFactor = 0.05;
 controls.rotateSpeed = 0.5;
 controls.minDistance = 3;
 controls.maxDistance = 10;
+controls.enableZoom = true;
+controls.autoRotate = false;
+controls.update();
 
 // 添加星空背景
 const starGeometry = new THREE.BufferGeometry();
@@ -207,16 +278,16 @@ const glowMaterial = new THREE.ShaderMaterial({
         varying vec3 vPosition;
         void main() {
             // 基础辉光颜色
-            vec3 baseGlow = vec3(0.0, 0.4, 1.0);
+            vec3 baseGlow = vec3(0.0, 0.8, 0.4);
             
             // 添加动态颜色变化
             float colorVariation = sin(time * 0.5) * 0.5 + 0.5;
-            vec3 dynamicColor = mix(baseGlow, vec3(0.0, 0.8, 1.0), colorVariation);
+            vec3 dynamicColor = mix(baseGlow, vec3(0.0, 1.0, 0.5), colorVariation);
             
             // 添加极光效果
             float aurora = sin(vPosition.y * 10.0 + time) * 0.5 + 0.5;
             aurora *= smoothstep(0.8, 1.0, abs(vPosition.y));
-            vec3 auroraColor = vec3(0.0, 0.8, 1.0) * aurora * 0.3;
+            vec3 auroraColor = vec3(0.0, 1.0, 0.5) * aurora * 0.3;
             
             vec3 finalGlow = dynamicColor * intensity + auroraColor;
             gl_FragColor = vec4(finalGlow, 1.0);
@@ -234,6 +305,7 @@ window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 });
 
 let time = 0;
@@ -247,6 +319,9 @@ function animate() {
     atmosphereMaterial.uniforms.time.value = time;
     glowMaterial.uniforms.time.value = time;
     
+    // 更新控制器
+    controls.update();
+    
     // 地球自转
     earth.rotation.y += 0.0005;
     atmosphere.rotation.y += 0.0005;
@@ -258,7 +333,7 @@ function animate() {
         glow.position
     );
     
-    controls.update();
+    // 渲染场景
     renderer.render(scene, camera);
 }
 

@@ -7,7 +7,7 @@ scene.background = new THREE.Color(0x000000);
 
 // 创建相机
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-camera.position.z = 5;
+camera.position.set(0, 0, 5);
 
 // 创建渲染器
 const renderer = new THREE.WebGLRenderer({ 
@@ -228,6 +228,10 @@ controls.minDistance = 3;
 controls.maxDistance = 10;
 controls.enableZoom = true;
 controls.autoRotate = false;
+controls.enablePan = false;
+controls.target.set(0, 0, 0);
+controls.minPolarAngle = -Math.PI;
+controls.maxPolarAngle = Math.PI;
 controls.update();
 
 // 添加星空背景
@@ -309,9 +313,20 @@ window.addEventListener('resize', () => {
 });
 
 let time = 0;
+let lastTime = 0;
+let rotationSpeed = 0;
+const maxRotationSpeed = 0.1;
+const acceleration = 0.001;
+const deceleration = 0.0005;
+
 // 动画循环
-function animate() {
+function animate(currentTime) {
     requestAnimationFrame(animate);
+    
+    // 计算时间差
+    const deltaTime = currentTime - lastTime;
+    lastTime = currentTime;
+    
     time += 0.01;
     
     // 更新着色器时间
@@ -322,19 +337,23 @@ function animate() {
     // 更新控制器
     controls.update();
     
-    // 地球自转
-    earth.rotation.y += 0.0005;
-    atmosphere.rotation.y += 0.0005;
-    glow.rotation.y += 0.0005;
+    // 应用旋转速度
+    if (controls.isDragging) {
+        // 当用户拖动时增加速度
+        rotationSpeed = Math.min(rotationSpeed + acceleration * deltaTime, maxRotationSpeed);
+    } else {
+        // 当用户停止拖动时逐渐减速
+        rotationSpeed = Math.max(0, rotationSpeed - deceleration * deltaTime);
+    }
     
-    // 更新辉光效果
-    glowMaterial.uniforms.viewVector.value = new THREE.Vector3().subVectors(
-        camera.position,
-        glow.position
-    );
+    // 应用旋转
+    if (rotationSpeed > 0) {
+        earth.rotation.y += rotationSpeed;
+    }
     
     // 渲染场景
     renderer.render(scene, camera);
 }
 
-animate(); 
+// 开始动画循环
+animate(0); 

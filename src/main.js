@@ -16,7 +16,7 @@ const renderer = new THREE.WebGLRenderer({
     precision: 'highp'
 });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // 限制最大像素比
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.2;
 renderer.shadowMap.enabled = true;
@@ -323,7 +323,6 @@ const deceleration = 0.0005;
 function animate(currentTime) {
     requestAnimationFrame(animate);
     
-    // 计算时间差
     const deltaTime = currentTime - lastTime;
     lastTime = currentTime;
     
@@ -339,10 +338,8 @@ function animate(currentTime) {
     
     // 应用旋转速度
     if (controls.isDragging) {
-        // 当用户拖动时增加速度
         rotationSpeed = Math.min(rotationSpeed + acceleration * deltaTime, maxRotationSpeed);
     } else {
-        // 当用户停止拖动时逐渐减速
         rotationSpeed = Math.max(0, rotationSpeed - deceleration * deltaTime);
     }
     
